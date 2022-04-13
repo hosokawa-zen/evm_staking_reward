@@ -62,10 +62,10 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
 
     struct Staker {
         uint256 stake;
-        mapping(address => StakerRewardInfo) rewardInfo;
+        StakerRewardInfo rewardInfo;
     }
 
-    Reward[] public rewards;
+    Reward public reward;
     mapping(address => Staker) public stakers;
     uint64 public startingTimestamp;
     uint64 public endingTimestamp;
@@ -84,9 +84,9 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
         address indexed newOwner
     );
     event Initialized(
-        address[] rewardsTokenAddresses,
+        address rewardsTokenAddress,
         address stakableTokenAddress,
-        uint256[] rewardsAmounts,
+        uint256 rewardsAmount,
         uint64 startingTimestamp,
         uint64 endingTimestamp,
         bool locked,
@@ -95,15 +95,15 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
     event Canceled();
     event Staked(address indexed staker, uint256 amount);
     event Withdrawn(address indexed withdrawer, uint256 amount);
-    event Claimed(address indexed claimer, uint256[] amounts);
-    event Recovered(uint256[] amounts);
+    event Claimed(address indexed claimer, uint256 amount);
+    event Recovered(uint256 amount);
     event RecoveredAfterCancel(address token, uint256 amount);
-    event UpdatedRewards(uint256[] amounts);
+    event UpdatedReward(uint256 amount);
 
     function initialize(
-        address[] calldata _rewardTokenAddresses,
+        address _rewardTokenAddress,
         address _stakableTokenAddress,
-        uint256[] calldata _rewardAmounts,
+        uint256 _rewardAmount,
         uint64 _startingTimestamp,
         uint64 _endingTimestamp,
         bool _locked,
@@ -111,39 +111,24 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
     ) external override onlyUninitialized {
         require(_startingTimestamp > block.timestamp, "SRD01");
         require(_endingTimestamp > _startingTimestamp, "SRD02");
-        require(_rewardTokenAddresses.length == _rewardAmounts.length, "SRD03");
-        require(_rewardTokenAddresses.length <= 5, "SRD27");
 
         // Initializing reward tokens and amounts
-        for (uint8 _i = 0; _i < _rewardTokenAddresses.length; _i++) {
-            address _rewardTokenAddress = _rewardTokenAddresses[_i];
-
-            // checking for duplicates
-            for (uint8 _j = _i + 1; _j < _rewardTokenAddresses.length; _j++)
-                require(
-                    _rewardTokenAddress != _rewardTokenAddresses[_j],
-                    "SRD28"
-                );
-
-            uint256 _rewardAmount = _rewardAmounts[_i];
-            require(_rewardTokenAddress != address(0), "SRD04");
-            require(_rewardAmount > 0, "SRD05");
-            IERC20 _rewardToken = IERC20(_rewardTokenAddress);
-            require(
-                _rewardToken.balanceOf(address(this)) >= _rewardAmount,
-                "SRD06"
-            );
-            rewards.push(
-                Reward({
-                    token: _rewardTokenAddress,
-                    amount: _rewardAmount,
-                    toBeRewarded: _rewardAmount * MULTIPLIER,
-                    perStakedToken: 0,
-                    recoverableAmount: 0,
-                    claimed: 0
-                })
-            );
-        }
+        require(_rewardTokenAddress != address(0), "SRD04");
+        require(_rewardAmount > 0, "SRD05");
+        IERC20 _rewardToken = IERC20(_rewardTokenAddress);
+        require(
+            _rewardToken.balanceOf(address(this)) >= _rewardAmount,
+            "SRD06"
+        );
+        reward = Reward({
+                token: _rewardTokenAddress,
+                amount: _rewardAmount,
+                toBeRewarded: _rewardAmount * MULTIPLIER,
+                perStakedToken: 0,
+                recoverableAmount: 0,
+                claimed: 0
+            });
+        
 
         require(_stakableTokenAddress != address(0), "SRD07");
         stakableToken = IERC20(_stakableTokenAddress);
@@ -159,9 +144,9 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
         canceled = false;
 
         emit Initialized(
-            _rewardTokenAddresses,
+            _rewardTokenAddress,
             _stakableTokenAddress,
-            _rewardAmounts,
+            _rewardAmount,
             _startingTimestamp,
             _endingTimestamp,
             _locked,
@@ -176,98 +161,38 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
         emit Canceled();
     }
 
-    function recoverRewardsAfterCancel() external override onlyOwner {
+    function recoverRewardAfterCancel() external override onlyOwner {
         require(canceled, "SRD29");
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            IERC20(_reward.token).safeTransfer(
-                owner,
-                IERC20(_reward.token).balanceOf(address(this))
-            );
-        }
+        IERC20(reward.token).safeTransfer(
+            owner,
+            IERC20(reward.token).balanceOf(address(this))
+        );
     }
 
-    function recoverRewardAfterCancel(address _token)
-        external
-        override
-        onlyOwner
-    {
-        require(canceled, "SRD29");
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward memory _reward = rewards[_i];
-            if (_reward.token == _token) {
-                uint256 _recoveredAmount =
-                    IERC20(_reward.token).balanceOf(address(this));
-                if (_recoveredAmount > 0)
-                    IERC20(_reward.token).safeTransfer(owner, _recoveredAmount);
-                emit RecoveredAfterCancel(_token, _recoveredAmount);
-                break;
-            }
-        }
-    }
-
-    function recoverUnassignedRewards()
+    function recoverUnassignedReward()
         external
         override
         onlyOwner
         onlyStarted
     {
         consolidateReward();
-        uint256[] memory _recoveredUnassignedRewards =
-            new uint256[](rewards.length);
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            // recoverable rewards are going to be recovered in this tx (if it does not revert),
-            // so we add them to the claimed rewards right now
-            _reward.claimed += _reward.recoverableAmount / MULTIPLIER;
-            delete _reward.recoverableAmount;
-            uint256 _recoverableRewards =
-                IERC20(_reward.token).balanceOf(address(this)) -
-                    (_reward.amount - _reward.claimed);
-            if (_recoverableRewards > 0) {
-                _recoveredUnassignedRewards[_i] = _recoverableRewards;
-                IERC20(_reward.token).safeTransfer(owner, _recoverableRewards);
-            }
-        }
-        emit Recovered(_recoveredUnassignedRewards);
-    }
 
-    function recoverSpecificUnassignedRewards(address _token)
-        external
-        override
-        onlyOwner
-        onlyStarted
-    {
-        consolidateReward();
-        uint256[] memory _recoveredUnassignedRewards =
-            new uint256[](rewards.length);
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            address _rewardToken = _reward.token;
-            if (_token == _rewardToken) {
-                // recoverable rewards are going to be recovered in this tx (if it does not revert),
-                // so we add them to the claimed rewards right now
-                _reward.claimed += _reward.recoverableAmount / MULTIPLIER;
-                delete _reward.recoverableAmount;
-                uint256 _recoverableRewards =
-                    IERC20(_rewardToken).balanceOf(address(this)) -
-                        (_reward.amount - _reward.claimed);
-                if (_recoverableRewards > 0) {
-                    _recoveredUnassignedRewards[_i] = _recoverableRewards;
-                    IERC20(_rewardToken).safeTransfer(
-                        owner,
-                        _recoverableRewards
-                    );
-                }
-                break;
-            }
+        // recoreward rewards a_amounting to be recovered in this tx (if it does not revert),
+        // so we add them to the claimed rewards right now
+        reward.claimed = reward.recoverableAmount / MULTIPLIER;
+        delete reward.recoverableAmount;
+        uint256 _recoverableRewards =
+            IERC20(reward.token).balanceOf(address(this)) -
+                (reward.amount - reward.claimed);
+        if (_recoverableRewards > 0) {
+            IERC20(reward.token).safeTransfer(owner, _recoverableRewards);
         }
-        emit Recovered(_recoveredUnassignedRewards);
+        emit Recovered(_recoverableRewards);
     }
 
     function stake(uint256 _amount) external override onlyRunning {
         require(
-            !IERC20StakingRewardDistributionFactory(factory).stakingPaused(),
+            !IStakingRewardDistributionFactory(factory).stakingPaused(),
             "SRD25"
         );
         require(_amount > 0, "SRD09");
@@ -296,114 +221,54 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
         emit Withdrawn(msg.sender, _amount);
     }
 
-    function claim(uint256[] memory _amounts, address _recipient)
-        external
-        override
-        onlyStarted
-    {
-        require(_amounts.length == rewards.length, "SRD14");
-        consolidateReward();
-        Staker storage _staker = stakers[msg.sender];
-        uint256[] memory _claimedRewards = new uint256[](rewards.length);
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            StakerRewardInfo storage _stakerRewardInfo =
-                _staker.rewardInfo[_reward.token];
-            uint256 _claimableReward =
-                _stakerRewardInfo.earned - _stakerRewardInfo.claimed;
-            uint256 _wantedAmount = _amounts[_i];
-            require(_claimableReward >= _wantedAmount, "SRD15");
-            if (_wantedAmount > 0) {
-                _stakerRewardInfo.claimed += _wantedAmount;
-                _reward.claimed += _wantedAmount;
-                IERC20(_reward.token).safeTransfer(_recipient, _wantedAmount);
-                _claimedRewards[_i] = _wantedAmount;
-            }
-        }
-        emit Claimed(msg.sender, _claimedRewards);
-    }
-
-    function claimAll(address _recipient) public override onlyStarted {
-        consolidateReward();
-        Staker storage _staker = stakers[msg.sender];
-        uint256[] memory _claimedRewards = new uint256[](rewards.length);
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            address _rewardToken = _reward.token;
-            StakerRewardInfo storage _stakerRewardInfo =
-                _staker.rewardInfo[_rewardToken];
-            uint256 _claimableReward =
-                _stakerRewardInfo.earned - _stakerRewardInfo.claimed;
-            if (_claimableReward > 0) {
-                _stakerRewardInfo.claimed += _claimableReward;
-                _reward.claimed += _claimableReward;
-                IERC20(_rewardToken).safeTransfer(_recipient, _claimableReward);
-                _claimedRewards[_i] = _claimableReward;
-            }
-        }
-        emit Claimed(msg.sender, _claimedRewards);
-    }
-
-    function claimAllSpecific(address _token, address _recipient)
-        external
+    function claim(uint256 _amount, address _recipient)
+        public
         override
         onlyStarted
     {
         consolidateReward();
         Staker storage _staker = stakers[msg.sender];
-        uint256[] memory _claimedRewards = new uint256[](rewards.length);
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            address _rewardToken = _reward.token;
-            if (_token == _rewardToken) {
-                StakerRewardInfo storage _stakerRewardInfo =
-                    _staker.rewardInfo[_rewardToken];
-                uint256 _claimableReward =
-                    _stakerRewardInfo.earned - _stakerRewardInfo.claimed;
-                if (_claimableReward > 0) {
-                    _stakerRewardInfo.claimed += _claimableReward;
-                    _reward.claimed += _claimableReward;
-                    IERC20(_rewardToken).safeTransfer(
-                        _recipient,
-                        _claimableReward
-                    );
-                    _claimedRewards[_i] = _claimableReward;
-                }
-                break;
-            }
+    
+        StakerRewardInfo storage _stakerRewardInfo =
+            _staker.rewardInfo;
+        uint256 _claimableReward =
+            _stakerRewardInfo.earned - _stakerRewardInfo.claimed;
+        require(_claimableReward >= _amount, "SRD15");
+        if (_amount > 0) {
+            _stakerRewardInfo.claimed += _amount;
+            reward.claimed += _amount;
+            IERC20(reward.token).safeTransfer(_recipient, _amount);
         }
-        emit Claimed(msg.sender, _claimedRewards);
+        
+        emit Claimed(msg.sender, _amount);
     }
 
     function exit(address _recipient) external override {
-        claimAll(_recipient);
+        Staker storage _staker = stakers[msg.sender];
+    
+        StakerRewardInfo storage _stakerRewardInfo =
+            _staker.rewardInfo;
+        uint256 _claimableReward = _stakerRewardInfo.earned - _stakerRewardInfo.claimed;
+        claim(_claimableReward, _recipient);
         withdraw(stakers[msg.sender].stake);
     }
 
-    function addRewards(address _token, uint256 _amount)
+    function addReward(uint256 _amount)
         external
         override
         onlyStarted
     {
         consolidateReward();
-        uint256[] memory _updatedAmounts = new uint256[](rewards.length);
-        bool _atLeastOneUpdate = false;
-        for (uint8 _i = 0; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            if (_reward.token == _token) {
-                _reward.amount += _amount;
-                _reward.toBeRewarded += _amount * MULTIPLIER;
-                _atLeastOneUpdate = true;
-                IERC20(_token).safeTransferFrom(
-                    msg.sender,
-                    address(this),
-                    _amount
-                );
-            }
-            _updatedAmounts[_i] = _reward.amount;
-        }
-        require(_atLeastOneUpdate, "SRD26");
-        emit UpdatedRewards(_updatedAmounts);
+  
+        reward.amount += _amount;
+        reward.toBeRewarded += _amount * MULTIPLIER;
+    
+        IERC20(reward.token).safeTransferFrom(
+            msg.sender,
+            address(this),
+            _amount
+        );
+        emit UpdatedReward(_amount);
     }
 
     function consolidateReward() private {
@@ -414,46 +279,43 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
         uint256 _durationLeft =
             uint256(endingTimestamp - lastConsolidationTimestamp);
         Staker storage _staker = stakers[msg.sender];
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            StakerRewardInfo storage _stakerRewardInfo =
-                _staker.rewardInfo[_reward.token];
-            if (_lastPeriodDuration > 0) {
-                uint256 _periodReward =
-                    (_lastPeriodDuration * _reward.toBeRewarded) /
-                        _durationLeft;
-                if (totalStakedTokensAmount == 0) {
-                    _reward.recoverableAmount += _periodReward;
-                    // no need to update the reward per staked token since in this period
-                    // there have been no staked tokens, so no reward has been given out to stakers
-                } else {
-                    _reward.perStakedToken +=
-                        _periodReward /
-                        totalStakedTokensAmount;
-                }
-                _reward.toBeRewarded -= _periodReward;
+        
+        StakerRewardInfo storage _stakerRewardInfo =
+            _staker.rewardInfo;
+        if (_lastPeriodDuration > 0) {
+            uint256 _periodReward =
+                (_lastPeriodDuration * reward.toBeRewarded) /
+                    _durationLeft;
+            if (totalStakedTokensAmount == 0) {
+                reward.recoverableAmount += _periodReward;
+                // no need to update th_amountard per staked token since in this period
+                // there have been no staked tokens, so no reward has been given out to stakers
+            } else {
+                reward.perStakedToken +=
+                    _periodReward /
+                    totalStakedTokensAmount;
             }
-            uint256 _rewardSinceLastConsolidation =
-                (_staker.stake *
-                    (_reward.perStakedToken -
-                        _stakerRewardInfo.consolidatedPerStakedToken)) /
-                    MULTIPLIER;
-            _stakerRewardInfo.earned += _rewardSinceLastConsolidation;
-            _stakerRewardInfo.consolidatedPerStakedToken = _reward
-                .perStakedToken;
+            reward.toBeRewarded -= _periodReward;
         }
+        uint256 _rewardSinceLastConsolidation =
+            (_staker.stake *
+                (reward.perStakedToken -
+                    _stakerRewardInfo.consolidatedPerStakedToken)) /
+                MULTIPLIER;
+        _stakerRewardInfo.earned += _rewardSinceLastConsolidation;
+        _stakerRewardInfo.consolidatedPerStakedToken = reward
+            .perStakedToken;
         lastConsolidationTimestamp = _consolidationTimestamp;
     }
 
-    function claimableRewards(address _account)
+    function claimableReward(address _account)
         external
         view
         override
-        returns (uint256[] memory)
+        returns (uint256)
     {
-        uint256[] memory _outstandingRewards = new uint256[](rewards.length);
         if (!initialized || block.timestamp < startingTimestamp)
-            return _outstandingRewards;
+            return 0;
         Staker storage _staker = stakers[_account];
         uint64 _consolidationTimestamp =
             uint64(Math.min(block.timestamp, endingTimestamp));
@@ -461,53 +323,44 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
             uint256(_consolidationTimestamp - lastConsolidationTimestamp);
         uint256 _durationLeft =
             uint256(endingTimestamp - lastConsolidationTimestamp);
-        for (uint256 _i; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            StakerRewardInfo storage _stakerRewardInfo =
-                _staker.rewardInfo[_reward.token];
-            uint256 _localRewardPerStakedToken = _reward.perStakedToken;
-            if (_lastPeriodDuration > 0 && totalStakedTokensAmount > 0) {
-                _localRewardPerStakedToken +=
-                    (_lastPeriodDuration * _reward.toBeRewarded) /
-                    totalStakedTokensAmount /
-                    _durationLeft;
-            }
-            uint256 _rewardSinceLastConsolidation =
-                (_staker.stake *
-                    (_localRewardPerStakedToken -
-                        _stakerRewardInfo.consolidatedPerStakedToken)) /
-                    MULTIPLIER;
-            _outstandingRewards[_i] =
-                _rewardSinceLastConsolidation +
-                (_stakerRewardInfo.earned - _stakerRewardInfo.claimed);
+
+        StakerRewardInfo storage _stakerRewardInfo =
+            _staker.rewardInfo;
+        uint256 _localRewardPerStakedToken = reward.perStakedToken;
+        if (_lastPeriodDuration > 0 && totalStakedTokensAmount > 0) {
+            _localRewardPerStakedToken +=
+                (_lastPeriodDuration * reward.toBeRewarded) /
+                totalStakedTokensAmount /
+                _durationLeft;
         }
-        return _outstandingRewards;
+        uint256 _rewardSinceLastConsolidation =
+            (_staker.stake *
+                (_localRewardPerStakedToken -
+                    _stakerRewardInfo.consolidatedPerStakedToken)) /
+                MULTIPLIER;
+        uint256 _outstandingReward =
+            _rewardSinceLastConsolidation +
+            (_stakerRewardInfo.earned - _stakerRewardInfo.claimed);
+    
+        return _outstandingReward;
     }
 
-    function getRewardTokens()
+    function getRewardToken()
         external
         view
         override
-        returns (address[] memory)
+        returns (address)
     {
-        address[] memory _rewardTokens = new address[](rewards.length);
-        for (uint256 _i = 0; _i < rewards.length; _i++) {
-            _rewardTokens[_i] = rewards[_i].token;
-        }
-        return _rewardTokens;
+        return reward.token;
     }
 
-    function rewardAmount(address _rewardToken)
+    function rewardAmount()
         external
         view
         override
         returns (uint256)
     {
-        for (uint256 _i = 0; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            if (_rewardToken == _reward.token) return _reward.amount;
-        }
-        return 0;
+        return reward.amount;
     }
 
     function stakedTokensOf(address _staker)
@@ -519,54 +372,35 @@ contract StakingRewardDistribution is IStakingRewardDistribution {
         return stakers[_staker].stake;
     }
 
-    function earnedRewardsOf(address _staker)
+    function earnedRewardOf(address _staker)
         external
         view
-        returns (uint256[] memory)
+        returns (uint256)
     {
         Staker storage _stakerFromStorage = stakers[_staker];
-        uint256[] memory _earnedRewards = new uint256[](rewards.length);
-        for (uint256 _i; _i < rewards.length; _i++) {
-            _earnedRewards[_i] = _stakerFromStorage.rewardInfo[
-                rewards[_i].token
-            ]
-                .earned;
-        }
-        return _earnedRewards;
+        return _stakerFromStorage.rewardInfo.earned;
     }
 
-    function recoverableUnassignedReward(address _rewardToken)
+    function recoverableUnassignedReward()
         external
         view
         override
         returns (uint256)
     {
-        for (uint256 _i = 0; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            if (_reward.token == _rewardToken) {
-                uint256 _nonRequiredFunds =
-                    _reward.claimed + (_reward.recoverableAmount / MULTIPLIER);
-                return
-                    IERC20(_reward.token).balanceOf(address(this)) -
-                    (_reward.amount - _nonRequiredFunds);
-            }
-        }
-        return 0;
+        uint256 _nonRequiredFunds =
+            reward.claimed + (reward.recoverableAmount / MULTIPLIER);
+        return IERC20(reward.token).balanceOf(address(this)) -
+            (reward.amount - _nonRequiredFunds);
     }
 
-    function getClaimedRewards(address _claimer)
+    function getClaimedReward(address _claimer)
         external
         view
         override
-        returns (uint256[] memory)
+        returns (uint256)
     {
         Staker storage _staker = stakers[_claimer];
-        uint256[] memory _claimedRewards = new uint256[](rewards.length);
-        for (uint256 _i = 0; _i < rewards.length; _i++) {
-            Reward storage _reward = rewards[_i];
-            _claimedRewards[_i] = _staker.rewardInfo[_reward.token].claimed;
-        }
-        return _claimedRewards;
+        return _staker.rewardInfo.claimed;
     }
 
     function renounceOwnership() external override onlyOwner {

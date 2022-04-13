@@ -23,7 +23,7 @@ contract StakingRewardDistributionFactory is
 
     address public override implementation;
     bool public override stakingPaused;
-    IERC20StakingRewardDistribution[] public override distributions;
+    IStakingRewardDistribution[] public override distributions;
 
     event DistributionCreated(address owner, address deployedAt);
 
@@ -50,28 +50,26 @@ contract StakingRewardDistributionFactory is
     }
 
     function createDistribution(
-        address[] calldata _rewardTokenAddresses,
+        address _rewardTokenAddress,
         address _stakableTokenAddress,
-        uint256[] calldata _rewardAmounts,
+        uint256 _rewardAmount,
         uint64 _startingTimestamp,
         uint64 _endingTimestamp,
         bool _locked,
         uint256 _stakingCap
     ) public override {
         address _distributionProxy = Clones.clone(implementation);
-        for (uint256 _i; _i < _rewardTokenAddresses.length; _i++) {
-            IERC20(_rewardTokenAddresses[_i]).safeTransferFrom(
-                msg.sender,
-                _distributionProxy,
-                _rewardAmounts[_i]
-            );
-        }
-        IERC20StakingRewardDistribution _distribution =
-            IERC20StakingRewardDistribution(_distributionProxy);
+        IERC20(_rewardTokenAddress).safeTransferFrom(
+            msg.sender,
+            _distributionProxy,
+            _rewardAmount
+        );
+        IStakingRewardDistribution _distribution =
+            IStakingRewardDistribution(_distributionProxy);
         _distribution.initialize(
-            _rewardTokenAddresses,
+            _rewardTokenAddress,
             _stakableTokenAddress,
-            _rewardAmounts,
+            _rewardAmount,
             _startingTimestamp,
             _endingTimestamp,
             _locked,

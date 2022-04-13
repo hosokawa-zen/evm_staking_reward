@@ -3,26 +3,26 @@
 pragma solidity 0.8.4;
 
 interface IStakingRewardDistribution {
-    function rewardAmount(address _rewardToken) external view returns (uint256);
+    function rewardAmount() external view returns (uint256);
 
-    function recoverableUnassignedReward(address _rewardToken)
+    function recoverableUnassignedReward()
         external
         view
         returns (uint256);
 
     function stakedTokensOf(address _staker) external view returns (uint256);
 
-    function getRewardTokens() external view returns (address[] memory);
+    function getRewardToken() external view returns (address);
 
-    function getClaimedRewards(address _claimer)
+    function getClaimedReward(address _claimer)
         external
         view
-        returns (uint256[] memory);
+        returns (uint256);
 
     function initialize(
-        address[] calldata _rewardTokenAddresses,
+        address _rewardTokenAddress,
         address _stakableTokenAddress,
-        uint256[] calldata _rewardAmounts,
+        uint256 _rewardAmount,
         uint64 _startingTimestamp,
         uint64 _endingTimestamp,
         bool _locked,
@@ -31,34 +31,26 @@ interface IStakingRewardDistribution {
 
     function cancel() external;
 
-    function recoverRewardsAfterCancel() external;
+    function recoverRewardAfterCancel() external;
 
-    function recoverRewardAfterCancel(address _token) external;
-
-    function recoverUnassignedRewards() external;
-
-    function recoverSpecificUnassignedRewards(address _token) external;
+    function recoverUnassignedReward() external;
 
     function stake(uint256 _amount) external;
 
     function withdraw(uint256 _amount) external;
 
-    function claim(uint256[] memory _amounts, address _recipient) external;
-
-    function claimAll(address _recipient) external;
-
-    function claimAllSpecific(address _token, address _recipient) external;
+    function claim(uint256 _amounts, address _recipient) external;
 
     function exit(address _recipient) external;
 
-    function claimableRewards(address _staker)
+    function claimableReward(address _staker)
         external
         view
-        returns (uint256[] memory);
+        returns (uint256);
 
     function renounceOwnership() external;
 
     function transferOwnership(address _newOwner) external;
 
-    function addRewards(address _token, uint256 _amount) external;
+    function addReward(uint256 _amount) external;
 }

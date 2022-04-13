@@ -6,9 +6,9 @@ import "./IStakingRewardDistribution.sol";
 
 interface IStakingRewardDistributionFactory {
     function createDistribution(
-        address[] calldata _rewardTokenAddresses,
+        address _rewardTokenAddress,
         address _stakableTokenAddress,
-        uint256[] calldata _rewardAmounts,
+        uint256 _rewardAmount,
         uint64 _startingTimestamp,
         uint64 _endingTimestamp,
         bool _locked,
@@ -24,7 +24,7 @@ interface IStakingRewardDistributionFactory {
     function distributions(uint256 _index)
         external
         view
-        returns (IERC20StakingRewardDistribution);
+        returns (IStakingRewardDistribution);
 
     function stakingPaused() external view returns (bool);
 

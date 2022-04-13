@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 
-pragma solidity >=0.8.0;
+pragma solidity 0.8.4;
 
-interface IStakingRewardsDistribution {
+interface IStakingRewardDistribution {
     function rewardAmount(address _rewardToken) external view returns (uint256);
 
     function recoverableUnassignedReward(address _rewardToken)

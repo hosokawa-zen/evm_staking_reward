@@ -5,8 +5,8 @@ pragma solidity 0.8.4;
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./interfaces/IERC20StakingRewardsDistributionFactory.sol";
-import "./interfaces/IERC20StakingRewardsDistribution.sol";
+import "./interfaces/IStakingRewardDistributionFactory.sol";
+import "./interfaces/IStakingRewardDistribution.sol";
 
 /**
  * Errors codes:
@@ -40,7 +40,7 @@ import "./interfaces/IERC20StakingRewardsDistribution.sol";
  * SRD28: duplicated reward tokens
  * SRD29: distribution must be canceled
  */
-contract StakingRewardsDistribution is IStakingRewardsDistribution {
+contract StakingRewardDistribution is IStakingRewardDistribution {
     using SafeERC20 for IERC20;
 
     uint224 constant MULTIPLIER = 2**112;
@@ -267,7 +267,7 @@ contract StakingRewardsDistribution is IStakingRewardsDistribution {
 
     function stake(uint256 _amount) external override onlyRunning {
         require(
-            !IERC20StakingRewardsDistributionFactory(factory).stakingPaused(),
+            !IERC20StakingRewardDistributionFactory(factory).stakingPaused(),
             "SRD25"
         );
         require(_amount > 0, "SRD09");

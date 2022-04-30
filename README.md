@@ -1,4 +1,4 @@
-# ERC20 Staking Reward Distribution
+# ERC20 Staking Reward
 
 In the ERC20 token staking, When the staking token is same with the reward token, we can implement [step-staking](https://github.com/sushiswap/sushiswap/blob/master/contracts/SushiBar.sol)
 This staking is the case when the staking token is different with reward token.
